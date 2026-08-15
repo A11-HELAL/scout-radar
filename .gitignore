@@ -1,0 +1,17 @@
+# Data - never commit to GitHub
+data/
+*.csv
+*.parquet
+*.zip
+
+# Secrets
+kaggle.json
+.env
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
