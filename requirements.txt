@@ -1,6 +1,13 @@
+# Colab already ships most of these. Ranges rather than pins on purpose: we
+# want the project to still install next year, not to freeze one exact build.
 pandas>=2.0
 numpy>=1.24
 scikit-learn>=1.3
 scipy>=1.10
 matplotlib>=3.7
+pyarrow>=14.0      # writing/reading data/processed/*.parquet
 pytest>=7.4
+
+# OPTIONAL - deliberately not installed by default, because nothing in
+# run_all.py or in the tests imports it:
+#   pip install shap      -> enables notebooks/shap_demo.py
