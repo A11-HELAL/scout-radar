@@ -28,8 +28,25 @@ def safe_merge(left, right, how="left", label="", **kwargs):
     return out
 
 
+def _int_key(series):
+    """Force a numeric id onto ONE dtype, everywhere.
+
+    Real CSV dumps hand you the same club id as 12, 12.0 and "12" in three
+    different files. pandas then merges int64 against object, matches nothing,
+    and hands you a table full of empty club names without raising anything.
+    Int64 (capital I) is the nullable integer type, so a missing id stays
+    missing instead of turning into 0.
+    """
+    return pd.to_numeric(series, errors="coerce").astype("Int64")
+
+
+def _text_key(series):
+    """Same idea for string ids like "GB1", which arrive with stray spaces."""
+    return series.astype(str).str.strip()
+
+
 def load_raw(raw_dir=None):
-    """Read the five CSVs and normalise the columns that move between versions."""
+    """Read the five CSVs and normalise everything that moves between dumps."""
     raw_dir = raw_dir or config.RAW
 
     players = pd.read_csv(
@@ -45,11 +62,36 @@ def load_raw(raw_dir=None):
     club_col = "player_club_id" if "player_club_id" in appearances.columns else "club_id"
     appearances = appearances.rename(columns={club_col: "club_id"})
 
-    # in this dataset height 0 means "unknown", not "0 cm"
-    players["height_in_cm"] = players["height_in_cm"].replace(0, np.nan)
+    # --- one dtype per id, in every table -----------------------------------
+    for table in (players, valuations, appearances):
+        table["player_id"] = _int_key(table["player_id"])
+    appearances["club_id"] = _int_key(appearances["club_id"])
+    clubs["club_id"] = _int_key(clubs["club_id"])
+    appearances["competition_id"] = _text_key(appearances["competition_id"])
+    competitions["competition_id"] = _text_key(competitions["competition_id"])
+    clubs["domestic_competition_id"] = _text_key(clubs["domestic_competition_id"])
 
-    # Keep the dump's own flag when it exists and only fall back to our own
-    # rule when it does not. Never overwrite a real column with a guess.
+    # match statistics must be numbers, not strings
+    for column in ("minutes_played", "goals", "assists", "yellow_cards", "red_cards"):
+        appearances[column] = pd.to_numeric(
+            appearances[column], errors="coerce"
+        ).fillna(0.0)
+
+    valuations["market_value_in_eur"] = pd.to_numeric(
+        valuations["market_value_in_eur"], errors="coerce"
+    )
+
+    # in this dataset height 0 means "unknown", not "0 cm"
+    players["height_in_cm"] = pd.to_numeric(
+        players["height_in_cm"], errors="coerce"
+    ).replace(0, np.nan)
+
+    # The dump we use (davidcariboo/player-scores) does NOT ship an
+    # is_major_national_league column - we opened the file and checked. So in
+    # practice the else-branch is the one that runs, and "major league" in this
+    # project means "one of the TOP5 ids in config.py". The first branch only
+    # exists so a future dump that does have the column is respected instead of
+    # being overwritten by our guess.
     if "is_major_national_league" in competitions.columns:
         flag = competitions["is_major_national_league"].astype(str).str.strip().str.lower()
         competitions["is_major"] = flag.isin(["true", "1", "yes", "y"]).astype(int)
@@ -71,7 +113,9 @@ def _target(valuations, snapshot):
     y = past.groupby("player_id").tail(1)[["player_id", "date", "market_value_in_eur"]]
     y = y.rename(columns={"date": "valuation_date"})
     days_old = (snapshot - y["valuation_date"]).dt.days
-    keep = (days_old <= config.MAX_VALUATION_AGE_DAYS) & (y["market_value_in_eur"] > 0)
+    keep = (days_old <= config.TARGET_MAX_VALUATION_AGE_DAYS) & (
+        y["market_value_in_eur"] > 0
+    )
     return y[keep].copy()
 
 
@@ -180,6 +224,18 @@ def build_dataset(snapshot, raw=None):
         ),
         left_on="domestic_competition_id", right_on="competition_id", label="+ league",
     )
+
+    # A join that matched almost nothing is a dtype bug, not a data problem, and
+    # it is invisible unless we check for it: every club column would just be
+    # empty and the model would quietly train on NaN.
+    if len(df):
+        matched = float(df["club_name"].notna().mean())
+        if matched < 0.5:
+            raise ValueError(
+                f"only {matched:.0%} of rows found their club. The club_id dtypes "
+                "in appearances.csv and clubs.csv do not line up - check "
+                "_int_key() in load_raw()."
+            )
 
     df["league_tier"] = (
         df["domestic_competition_id"].map(config.LEAGUE_TIERS).fillna(config.DEFAULT_TIER)
