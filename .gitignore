@@ -1,4 +1,14 @@
+# ---------------------------------------------------------------------------
+# SECRETS - never commit these. This repository is PUBLIC.
+# ---------------------------------------------------------------------------
+kaggle.json
+.env
+.env.*
+*.zip
+
+# ---------------------------------------------------------------------------
 # raw and generated data never goes in git
+# ---------------------------------------------------------------------------
 data/
 *.csv
 *.parquet
@@ -6,7 +16,9 @@ data/
 # generated figures
 reports/figures/
 
+# ---------------------------------------------------------------------------
 # python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -14,9 +26,12 @@ __pycache__/
 .venv/
 venv/
 
+# ---------------------------------------------------------------------------
 # os / editor
+# ---------------------------------------------------------------------------
 .DS_Store
 .vscode/
 .idea/
 
-# note: exports/ IS committed - the website reads exports/undervalued.json
+# NOTE: exports/ IS committed on purpose - the website reads
+# exports/undervalued.json, so that file has to live in the repository.
