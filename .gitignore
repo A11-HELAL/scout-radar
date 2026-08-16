@@ -1,17 +1,22 @@
-# Data - never commit to GitHub
+# raw and generated data never goes in git
 data/
 *.csv
 *.parquet
-*.zip
 
-# Secrets
-kaggle.json
-.env
+# generated figures
+reports/figures/
 
-# Python
+# python
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
 .ipynb_checkpoints/
+.venv/
+venv/
 
-# OS
+# os / editor
 .DS_Store
+.vscode/
+.idea/
+
+# note: exports/ IS committed - the website reads exports/undervalued.json
