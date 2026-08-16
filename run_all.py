@@ -1,88 +1,116 @@
-"""Run the whole project with one command:  python run_all.py
+"""Run the whole story end to end and print every number the report needs.
 
-Every number that ends up in the report or on a slide is printed by this file,
-in the order the story is told. Nothing is computed in a notebook and copied by
-hand - that is how numbers stop matching between the slides and the code.
+    python run_all.py
+
+Order matters: build both snapshots -> check for leakage -> train -> ablation ->
+score June 2023 -> look up what really happened by June 2024 -> export -> plot.
+
+Nothing in here computes anything itself; it is the narrator. If a number looks
+wrong, the bug is in src/, not in this file.
 """
 
-import pandas as pd
+from pathlib import Path
 
 from src import config
 from src.backtest import add_residuals, attach_future_value, run_backtest
 from src.export import export_shortlist
 from src.features import assert_no_leakage, build_dataset, load_raw
+from src.plots import save_all
 from src.train import ablation, feature_importance, train_all
 
-pd.set_option("display.width", 160)
-pd.set_option("display.max_columns", 40)
+
+def _step(title):
+    print(f"\n{'=' * 74}\n{title}\n{'=' * 74}")
 
 
-def banner(text):
-    print(f"\n{'=' * 78}\n{text}\n{'=' * 78}")
-
-
-def main(make_figures=True):
-    banner("1. loading the raw tables")
+def main():
+    _step("1/7  building the two snapshots")
     raw = load_raw()
     players, valuations, appearances, clubs, competitions = raw
-    print(f"players {len(players):,} | valuations {len(valuations):,} | "
-          f"appearances {len(appearances):,} | clubs {len(clubs):,}")
+    print(f"raw tables: {len(players):,} players, {len(valuations):,} valuations, "
+          f"{len(appearances):,} appearances")
 
-    banner("2. building the two snapshots")
-    train = build_dataset(config.SNAPSHOT_TRAIN, raw)
-    test = build_dataset(config.SNAPSHOT_TEST, raw)
-    print(f"train {config.SNAPSHOT_TRAIN}: {train.shape[0]:,} players")
-    print(f"test  {config.SNAPSHOT_TEST}: {test.shape[0]:,} players")
-    assert train["player_id"].is_unique, "duplicate players in train"
-    assert train["snapshot"].max() <= pd.Timestamp(config.SNAPSHOT_TRAIN)
+    train = build_dataset(config.SNAPSHOT_TRAIN, raw=raw)
+    test = build_dataset(config.SNAPSHOT_TEST, raw=raw)
+    print(f"train {config.SNAPSHOT_TRAIN}: {train.shape}")
+    print(f"test  {config.SNAPSHOT_TEST}: {test.shape}")
 
-    banner("3. leakage check")
-    correlations = assert_no_leakage(train)
-    print("strongest correlations with the target (all must be well under 0.98):")
-    print(correlations.head(6).round(3).to_string())
+    # Saved so the EDA notebook and the report can reload the exact table this
+    # run used, without rebuilding it and without re-downloading anything.
+    processed = Path(config.PROCESSED)
+    processed.mkdir(parents=True, exist_ok=True)
+    try:
+        train.to_parquet(processed / "train_2023.parquet", index=False)
+        test.to_parquet(processed / "test_2024.parquet", index=False)
+        print(f"saved  -> {processed}/train_2023.parquet + test_2024.parquet")
+    except ImportError:
+        print("skipped the parquet snapshots (pip install pyarrow to enable them)")
 
-    banner("4. model leaderboard (trained on 2023, scored on 2024)")
-    leaderboard, fitted, best = train_all(train, test)
-    print(leaderboard.round(4).to_string())
-    print(f"\nwinner: {best}")
+    _step("2/7  leakage check")
+    corr = assert_no_leakage(train)
+    print("strongest correlations between a feature and the target:")
+    print(corr.head(8).round(3).to_string())
 
-    banner("5. ablation - do the present-day club columns carry the result?")
-    print(ablation(train, test).round(4).to_string(index=False))
+    _step("3/7  leaderboard  (trained on 2023, scored on 2024)")
+    leaderboard, fitted, _ = train_all(train, test)
+    print(leaderboard.round(3).to_string(index=False))
+    best_name = leaderboard.loc[0, "model"]
+    best = fitted[best_name]
+    print(f"\nwinner: {best_name}")
 
-    banner("6. backtest")
-    scored = add_residuals(train, fitted[best])
+    _step("4/7  ablation  (same model, one feature group removed at a time)")
+    print(ablation(train, test, model_name=best_name).round(3).to_string(index=False))
+
+    _step("5/7  the backtest  (June 2023 -> June 2024)")
+    scored = add_residuals(train, best)
     scored = attach_future_value(scored, valuations)
-    followed, by_decile, shortlist, summary = run_backtest(scored)
+    followed, by_decile, measured, summary = run_backtest(scored)
     print(by_decile.round(3).to_string())
     print()
     for key, value in summary.items():
-        print(f"{key:28s} {value}")
+        print(f"  {key:<26} {value}")
 
-    banner("7. the shortlist we actually recommend")
-    columns = ["name", "age", "club_name", "league_name", "minutes",
-               "market_value_in_eur", "pred_value_eur", "residual", "growth_pct"]
-    print(shortlist[columns].round(2).to_string(index=False))
-
-    banner("8. exporting for the website")
+    _step("6/7  export")
     meta = {
-        "best_model": best,
-        "MAE_log": round(float(leaderboard.loc[best, "MAE_log"]), 4),
-        "MedAPE_eur": round(float(leaderboard.loc[best, "MedAPE_eur"]), 4),
-        "Spearman": round(float(leaderboard.loc[best, "Spearman"]), 4),
+        "best_model": best_name,
+        "MAE_log": round(float(leaderboard.loc[0, "MAE_log"]), 4),
+        "MedAPE_pct": round(float(leaderboard.loc[0, "MedAPE_pct"]), 1),
+        "Spearman": round(float(leaderboard.loc[0, "Spearman"]), 3),
         "backtest": summary,
     }
-    path, _ = export_shortlist(scored, meta=meta)
-    print(f"wrote {path}")
+    exported = export_shortlist(scored, meta=meta)
+    print(f"website : {exported['web_path']}   ({len(exported['web'])} players)")
+    print(f"report  : {exported['full_path']}   ({len(exported['shortlist'])} players)")
+    print("\nthe top of the published list:")
+    print(
+        exported["shortlist"][
+            ["name", "age", "club_name", "market_value_in_eur", "pred_value_eur"]
+        ].head(10).round(1).to_string(index=False)
+    )
 
-    if make_figures:
-        banner("9. figures")
-        from src.plots import save_all
-        for figure in save_all(scored, by_decile, feature_importance(fitted[best])):
-            print(f"wrote {figure}")
+    _step("7/7  figures")
+    importance = feature_importance(best, test)
+    print(importance.head(10).round(4).to_string(index=False))
+    print()
+    for path in save_all(followed, by_decile, importance):
+        print(f"  {path}")
 
-    print("\ndone.")
-    return {"train": train, "test": test, "leaderboard": leaderboard,
-            "scored": scored, "shortlist": shortlist, "summary": summary}
+    _step("copy these straight into the results table in README.md")
+    print(f"  best model               {best_name}")
+    print(f"  MedAPE                   {meta['MedAPE_pct']}%")
+    print(f"  Spearman (ranking)       {meta['Spearman']}")
+    print(f"  backtest coverage        {summary['coverage']}"
+          f"  ({summary['n_followed']} of {summary['n_recommended']} followed)")
+    print(f"  cheapest decile growth   {summary['median_growth_undervalued']} (log)")
+    print(f"  dearest decile growth    {summary['median_growth_overvalued']} (log)")
+    print(f"  difference, 95% interval {summary['diff_95pct_ci']}")
+    print(f"  significance             {summary['p_value_text']}")
+    print(f"  precision@{config.SHORTLIST_SIZE} vs baseline    "
+          f"{summary['precision_at_k']} vs {summary['baseline_rate']} "
+          f"(lift {summary['lift']}x, pool of {summary['eligible_pool_size']})")
+    print(f"  shipped vs measured list {summary['shortlist_overlap']} of "
+          f"{config.SHORTLIST_SIZE} players in common")
+    print()
 
 
 if __name__ == "__main__":
