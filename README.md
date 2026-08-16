@@ -51,8 +51,8 @@ python run_all.py
 ```
 
 Seven steps, each printing what it did: build both snapshots -> leakage check ->
-leaderboard -> ablation -> backtest -> export -> figures. Roughly a few minutes
-on Colab.
+leaderboard -> ablation -> backtest -> export -> figures. About two minutes on
+Colab.
 
 ### 3. In Google Colab
 
@@ -111,9 +111,9 @@ repository is public and `.gitignore` blocks it for you.
 | `notebooks/shap_demo.py` | Optional. One SHAP waterfall for one player, for the slides. Needs `pip install shap`. Nothing else imports it. |
 | `CHANGELOG.md` | What changed in the last review round, and why. Read this first if you saw the old code. |
 
-Outputs: `exports/*.json` (committed - the website reads them), four PNGs in the
-figures folder, and `data/processed/train_2023.parquet` / `test_2024.parquet`
-for whoever is doing the EDA.
+Outputs: `exports/*.json` (committed - the website reads them), four PNGs in
+`reports/figures/`, and `data/processed/train_2023.parquet` /
+`test_2024.parquet` for whoever is doing the EDA.
 
 ---
 
@@ -175,27 +175,73 @@ file `undervalued_full.json` is where new structure belongs.
 
 ---
 
-## Results - fill these in from your run
+## Results - the run of 16 August 2026
 
-| Metric | Value |
+26 tests green. Raw tables: 50,149 players, 656,301 valuations, 1,894,350
+appearances. Eligible players: 3,971 in the 2023 snapshot, 4,044 in 2024.
+
+### How well can we price a player?
+
+| Metric | Value | In plain words |
+|---|---|---|
+| Best model | `gradient_boosting` | beat ridge and random forest on every metric |
+| `MAE_log` | **0.479** | the mean baseline scores 1.260 |
+| `MedAPE_pct` | **37.9%** | half the predictions land within 37.9% of the real price |
+| `R2_log` | 0.838 | |
+| `Spearman` | **0.914** | the *ranking* is what the shortlist uses, and it is nearly right |
+
+### Did the shortlist actually work?
+
+| | Value |
 |---|---|
-| Best model | |
-| `MAE_log` (test snapshot) | |
-| `MedAPE_pct` | |
-| `Spearman` | |
-| Shortlist followed / recommended (`coverage`) | |
-| Median 1-year growth, undervalued decile | |
-| Median 1-year growth, overvalued decile | |
-| Difference, 95% bootstrap CI | |
-| p-value | |
-| precision@20 vs baseline (lift) | |
+| Recommended / followed (`coverage`) | 3,971 / 3,539 = **0.891** |
+| Median 1-year growth, cheapest decile | **+0.154 log = +17%** |
+| Median 1-year growth, dearest decile | **-0.318 log = -27%** |
+| Difference, 95% bootstrap CI | **(0.288, 0.580)** - does not contain zero |
+| Significance | **p < 1e-05** |
+| precision@20 (grew by >= 50%) | **0.65** |
+| Same-pool baseline rate | 0.29 (pool of 1,132) |
+| Lift | **2.24x** |
+| Shipped vs measured shortlist | 19 of 20 in common (one pick was censored) |
 
-`run_all.py` prints this block at the end, already labelled. Copy it straight in.
+The per-decile hit rate falls almost monotonically from 0.362 in the cheapest
+decile to 0.082 in the dearest.
+
+### Which features carry the model (ablation)
+
+| Dropped | `MAE_log` | `MedAPE_pct` | `Spearman` |
+|---|---|---|---|
+| nothing (all features) | 0.479 | 37.9 | 0.914 |
+| present-day club info | 0.588 | 48.4 | 0.868 |
+| on-pitch performance | 0.548 | 43.3 | 0.889 |
+| age | 0.573 | 42.9 | 0.875 |
+
+Every group earns its place. But the biggest single contributor is present-day
+club info, which is also the group we trust least - read the first limitation
+below before quoting the 0.479.
+
+Top permutation importances: `national_team_players` 0.297,
+`pct_minutes_major` 0.245, `age_sq` 0.056, `league_tier` 0.051, `minutes` 0.042.
 
 ---
 
 ## What we honestly cannot claim
 
+- **The model leans on present-day club information.**
+  `national_team_players` - how many internationals his club has *in the dump we
+  downloaded*, not in June 2023 - is the single strongest feature: 30% of the
+  permutation importance and 0.72 correlation with the target. That is
+  information from after the snapshot. Dropping the whole group costs `MAE_log`
+  0.479 -> 0.588 and `Spearman` 0.914 -> 0.868, both still far better than the
+  1.260 baseline. **The honest headline is the second pair**; the first pair is
+  the number you get with hindsight included.
+- **The cheapest decile may simply be reverting to the mean.** Decile 0 has a
+  median value of EUR 1M and grows 17%; decile 9 has a median of EUR 7M and
+  falls 27%. Cheap things drift up and expensive things drift down without any
+  model's help. The control we still owe the reader: rank the *same* eligible
+  pool by price alone, cheapest first, and check whether precision@20 stays near
+  0.29 or jumps to 0.65. Until that is run, "our model finds undervalued
+  players" is a claim, not a result.
 - **Market value is not a transfer fee.** Transfermarkt values are crowd
   estimates. We are modelling a crowd's opinion, not money that changed hands.
 - **We are partly predicting the same crowd we want to beat.** "Undervalued"
@@ -207,7 +253,7 @@ file `undervalued_full.json` is where new structure belongs.
 - **`competitions.csv` has no `is_major_national_league` column.** "Major league"
   is *our* definition - the five leagues listed in `config.TOP5`. It is a
   judgement call, not a fact from the data.
-- **Censoring is not random.** The ~13% we cannot follow are disproportionately
+- **Censoring is not random.** The ~11% we cannot follow are disproportionately
   the players whose careers went wrong. Our measured growth is therefore
   slightly optimistic.
 - **The EUR 1M value floor is a business choice, not a statistical one.** It
@@ -237,9 +283,10 @@ numbers directly and will tell you what you broke.
 
 ## Definition of done
 
-1. `pytest -q` is green.
-2. `run_all.py` finishes and prints the results block.
-3. The results table above is filled in with the real numbers.
+1. `pytest -q` is green. **Done - 26 passed.**
+2. `run_all.py` finishes and prints the results block. **Done.**
+3. The results table above is filled in with the real numbers. **Done.**
 4. `exports/undervalued.json` is committed and the site renders it.
-5. Every person can explain, out loud, one trap from the list above and where in
+5. The price-only control from the second limitation is run and reported.
+6. Every person can explain, out loud, one trap from the list above and where in
    the code it is handled.
