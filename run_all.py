@@ -1,13 +1,4 @@
-"""Run the whole story end to end and print every number the report needs.
-
-    python run_all.py
-
-Order matters: build both snapshots -> check for leakage -> train -> ablation ->
-score June 2023 -> look up what really happened by June 2024 -> export -> plot.
-
-Nothing in here computes anything itself; it is the narrator. If a number looks
-wrong, the bug is in src/, not in this file.
-"""
+"""Run the whole pipeline end to end and print every number the report needs."""
 
 from pathlib import Path
 
@@ -35,8 +26,6 @@ def main():
     print(f"train {config.SNAPSHOT_TRAIN}: {train.shape}")
     print(f"test  {config.SNAPSHOT_TEST}: {test.shape}")
 
-    # Saved so the EDA notebook and the report can reload the exact table this
-    # run used, without rebuilding it and without re-downloading anything.
     processed = Path(config.PROCESSED)
     processed.mkdir(parents=True, exist_ok=True)
     try:
