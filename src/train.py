@@ -1,9 +1,4 @@
-"""Preprocessing, the models, the leaderboard, the ablation, the importances.
-
-Everything the model touches is fitted INSIDE a Pipeline, so the imputer and
-the scaler learn from the training snapshot only. Scaling before the split is
-the quietest form of leakage there is.
-"""
+"""Preprocessing, the models, the leaderboard, the ablation, the importances."""
 
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -20,7 +15,6 @@ from src.evaluate import evaluate
 
 
 def build_preprocessor(features=None):
-    """Numbers: median-impute then scale. Categories: fill then one-hot."""
     features = list(features or config.FEATURES)
     numeric = [f for f in features if f in config.NUMERIC_FEATURES]
     categorical = [f for f in features if f in config.CATEGORICAL_FEATURES]
@@ -31,10 +25,6 @@ def build_preprocessor(features=None):
     ])
     categorical_pipe = Pipeline([
         ("impute", SimpleImputer(strategy="most_frequent")),
-        # handle_unknown="ignore": a club or nationality that only exists in the
-        # 2024 snapshot must not crash prediction.
-        # min_frequency=10: one-hotting a category with 3 players just gives the
-        # model 3 rows to memorise.
         ("onehot", OneHotEncoder(
             handle_unknown="ignore", min_frequency=10, sparse_output=False
         )),
@@ -46,13 +36,6 @@ def build_preprocessor(features=None):
 
 
 def build_models():
-    """Four models, from stupid to strong.
-
-    baseline_mean is not filler: it predicts the average value for everybody, so
-    it tells us how much the real models actually add. If a RandomForest cannot
-    beat it, we have no result to present. ridge is the linear reference - if a
-    straight line is nearly as good, the trees are not earning their keep.
-    """
     return {
         "baseline_mean": DummyRegressor(strategy="mean"),
         "ridge": Ridge(alpha=1.0),
@@ -73,11 +56,6 @@ def build_models():
 
 
 def train_all(train, test, features=None, models=None):
-    """Fit every model on the train snapshot, score it on the test snapshot.
-
-    Returns (leaderboard, fitted_pipelines, predictions). The leaderboard is
-    sorted by MAE in log space, so row 0 is the winner.
-    """
     features = list(features or config.FEATURES)
     models = models or build_models()
 
@@ -102,13 +80,6 @@ def train_all(train, test, features=None, models=None):
 
 
 def ablation(train, test, model_name="gradient_boosting", groups=None):
-    """Retrain the winner with one group of features removed at a time.
-
-    Three groups only (config.ABLATION_GROUPS) because each one costs a full
-    training run. The row that matters in the defence is "without present-day
-    club info": it says out loud how much of the result leans on columns that
-    know a little about the future.
-    """
     groups = groups if groups is not None else config.ABLATION_GROUPS
 
     rows = []
@@ -129,12 +100,6 @@ def ablation(train, test, model_name="gradient_boosting", groups=None):
 
 
 def feature_importance(fitted_pipeline, test, features=None, n_repeats=5):
-    """Permutation importance: shuffle one column and see how much worse it gets.
-
-    Measured on the TEST snapshot on purpose. The question is "does this column
-    help price players the model has never seen", not "how often did the trees
-    split on it".
-    """
     features = list(features or config.FEATURES)
     result = permutation_importance(
         fitted_pipeline,
