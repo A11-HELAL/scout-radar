@@ -4,9 +4,9 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # no screen in Colab or CI - render straight to file
+matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402  (must come after use("Agg"))
+import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from src import config  # noqa: E402
@@ -24,7 +24,6 @@ def _save(fig, name, out_dir=None):
 
 
 def plot_decile_growth(by_decile, out_dir=None):
-    """The money figure: did the players the model called cheap actually grow?"""
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.bar(by_decile.index.astype(str), by_decile["median_growth_log"], color=BLUE)
     ax.axhline(0, color="black", linewidth=0.8)
@@ -35,14 +34,11 @@ def plot_decile_growth(by_decile, out_dir=None):
 
 
 def plot_pred_vs_actual(scored, out_dir=None):
-    """Where the model is wrong, and in which direction."""
     fig, ax = plt.subplots(figsize=(5, 5))
     actual = scored["market_value_in_eur"]
     predicted = scored["pred_value_eur"]
     ax.scatter(actual, predicted, s=8, alpha=0.35, color=BLUE)
 
-    # The diagonal must not start at 0: this is a log-log plot and log(0) is
-    # undefined, so matplotlib would drop the line and print a warning.
     low = max(min(actual.min(), predicted.min()), 1_000)
     high = max(actual.max(), predicted.max())
     ax.plot([low, high], [low, high], color="black", linewidth=1, linestyle="--")
@@ -56,7 +52,6 @@ def plot_pred_vs_actual(scored, out_dir=None):
 
 
 def plot_importance(importance, out_dir=None, top=15):
-    """Which columns the model would miss if we shuffled them."""
     rows = importance.head(top).iloc[::-1]
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.barh(rows["feature"], rows["importance"], xerr=rows["std"], color=BLUE)
@@ -66,7 +61,6 @@ def plot_importance(importance, out_dir=None, top=15):
 
 
 def plot_age_curve(scored, out_dir=None):
-    """The age curve every scout already knows - a sanity check on our data."""
     bins = pd.cut(scored["age"], bins=[15, 19, 21, 23, 25, 27, 29, 31, 34, 45])
     curve = scored.groupby(bins, observed=True)["market_value_in_eur"].median()
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -80,7 +74,6 @@ def plot_age_curve(scored, out_dir=None):
 
 
 def save_all(followed, by_decile, importance, out_dir=None):
-    """Write all four figures and return their paths."""
     return [
         plot_decile_growth(by_decile, out_dir),
         plot_pred_vs_actual(followed, out_dir),
