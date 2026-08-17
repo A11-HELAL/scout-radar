@@ -1,20 +1,6 @@
-"""Write the JSON files the website and the report read.
-
-Two files, on purpose:
-
-  undervalued.json       a plain top-level JSON array of EXPORT_SIZE players.
-                         This is the file the website reads and its shape is a
-                         FROZEN CONTRACT - the front-end was built against
-                         these exact field names. Do not rename anything here
-                         without telling whoever owns the site.
-
-  undervalued_full.json  an object: the SHORTLIST_SIZE players the backtest
-                         actually measured, plus the shortlist rules and the
-                         model and backtest numbers, for the report and slides.
-
-Both files are written from the same dataframe in the same call, so they can
-never disagree with each other. The website never runs a model - it reads one
-small file - which is why the demo cannot break live in front of the examiners.
+"""Write the two JSON files: undervalued.json for the website (its field names
+are a frozen contract - add fields, never rename them) and undervalued_full.json
+for the report.
 """
 
 import json
@@ -28,11 +14,6 @@ from src.backtest import make_shortlist
 
 
 def _num(value, digits=2):
-    """A number the front-end can trust: never NaN, and int when digits is 0.
-
-    json.dumps writes NaN as the bare token NaN. That is not valid JSON and it
-    makes JSON.parse throw in the browser, so a missing number becomes null.
-    """
     if value is None or pd.isna(value):
         return None
     value = float(value)
@@ -42,24 +23,17 @@ def _num(value, digits=2):
 
 
 def _text(value):
-    """A string or null - never the literal "nan"."""
     if value is None or pd.isna(value):
         return None
     return str(value)
 
 
 def _at(row, column, default):
-    """row.get() that also treats a present-but-missing value as absent."""
     value = row.get(column)
     return default if value is None or pd.isna(value) else value
 
 
 def _reasons(row):
-    """Short human phrases, so a card is not just a number.
-
-    Deliberately hand-written rules rather than SHAP: every phrase here is one
-    a team member can explain in the defence without opening a library.
-    """
     bits = []
     if _at(row, "ga_p90", 0) >= 0.50:
         bits.append(f"{row['ga_p90']:.2f} goals+assists per 90")
@@ -73,9 +47,7 @@ def _reasons(row):
 
 
 def _card(row, rank):
-    """One player -> one flat JSON object the UI can render directly."""
     model_value = _num(row["pred_value_eur"], 0)
-    # exp(-residual) is how many times more the model thinks he is worth
     gap = _num(np.expm1(-row["residual"]) * 100, 1)
     reasons = _reasons(row)
     return {
@@ -89,15 +61,10 @@ def _card(row, rank):
         "league": _text(row.get("league_name")),
         "country": _text(row.get("country_of_citizenship")),
         "market_value_eur": _num(row["market_value_in_eur"], 0),
-        # the same number under both names: the site was built against
-        # predicted_value_eur, the report talks about model_value_eur
         "predicted_value_eur": model_value,
         "model_value_eur": model_value,
-        # likewise: gap_pct is the site's name, undervalued_pct is ours
         "gap_pct": gap,
         "undervalued_pct": gap,
-        # present-day contract info. Shown to the scout, NOT a model input -
-        # see ANACHRONISTIC_FEATURES in config.py.
         "contract_months_left": _num(row.get("contract_months_left"), 1),
         "minutes": _num(row.get("minutes"), 0),
         "games": _num(row.get("games"), 0),
@@ -109,23 +76,11 @@ def _card(row, rank):
 
 
 def _dump(payload):
-    """allow_nan=False: fail here rather than ship a file JSON.parse rejects."""
     return json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)
 
 
 def export_shortlist(scored, out_dir=None, meta=None,
                      web_filename=None, full_filename=None):
-    """Write both JSON files.
-
-    Returns a dict:
-        web_path   - the file the website reads
-        full_path  - the file the report reads
-        web        - the EXPORT_SIZE rows shown on the site
-        shortlist  - the SHORTLIST_SIZE rows the backtest measures
-
-    make_shortlist sorts by residual, so `shortlist` is literally the head of
-    `web`: the top of the published list is the list we quote numbers about.
-    """
     out_dir = Path(out_dir or config.EXPORTS)
     out_dir.mkdir(parents=True, exist_ok=True)
 
